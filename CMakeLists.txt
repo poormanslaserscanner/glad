@@ -88,6 +88,7 @@ add_custom_command(
 add_custom_target(glad-generate-files DEPENDS ${GLAD_SOURCES})
 set_source_files_properties(${GLAD_SOURCES} PROPERTIES GENERATED TRUE)
 add_library(glad ${GLAD_SOURCES})
+set_target_properties(glad PROPERTIES DEBUG_POSTFIX "_d")
 add_dependencies(glad glad-generate-files)
 target_include_directories(glad
     PUBLIC
