@@ -1,16 +1,12 @@
-from itertools import chain
+import os.path
 import os.path
 import sys
 
 from glad.lang.common.generator import Generator
 from glad.lang.common.util import makefiledir
 
-
 if sys.version_info >= (3, 0):
-    from io import StringIO
     basestring = str
-else:
-    from StringIO import StringIO
 
 
 def _gl_types(gen, f):
@@ -100,6 +96,8 @@ NIMTYPES = {
         'GLvdpauSurfaceNV': 'int32',
         'GLvoid': 'pointer',
         'GLsync': 'distinct pointer',
+        'GLeglClientBufferEXT': 'pointer',  # GL_EXT_external_buffer
+        'GLVULKANPROCNV': 'pointer',  # GL_NV_draw_vulkan_image
         'ClContext': 'distinct pointer',
         'ClEvent': 'distinct pointer'
     },
@@ -335,19 +333,16 @@ class NimGenerator(Generator):
             self.loader.write_end_load(f)
             f.write('\n')
 
-
     def write_func_definition(self, fobj, func):
         func_name = self.map_func_name(func)
         fobj.write('  {} = cast['.format(func_name))
         self.write_function_declaration(fobj, func)
         fobj.write('](load("{}"))\n'.format(func_name))
 
-
     def map_func_name(self, func):
         name = func.proto.name
         m = self.TYPE_DICT['SpecialFuncNames'][self.spec.NAME]
         return m[name] if name in m else name
-
 
     def generate_types(self, types):
         f = self._f_gl
@@ -358,31 +353,30 @@ class NimGenerator(Generator):
         self.TYPE_DICT['__other'][self.spec.NAME](self, f)
         f.write('\n')
 
-
     def generate_features(self, features):
         self.write_enums(features)
         self.write_funcs(features)
 
-
     def write_enums(self, features):
         f = self._f_gl
 
+        written = set()
+
         f.write('\n# Enums\nconst\n')
         for v in sorted(self.TYPE_DICT['SpecialNumbers'][self.spec.NAME]):
+            written.add(v[0])
             self.write_enum(f, *v)
         f.write('\n')
 
-        written = set()
         for feature in features:
             for enum in feature.enums:
                 if enum.group == 'SpecialNumbers':
-                    written.add(enum)
+                    written.add(enum.name)
                     continue
-                if not enum in written:
+                if enum.name not in written:
                     self.write_enum(f, enum.name, enum.value)
-                written.add(enum)
+                written.add(enum.name)
         f.write('\n')
-
 
     def write_funcs(self, features):
         f = self._f_gl
@@ -403,13 +397,11 @@ class NimGenerator(Generator):
             self.write_functions(f, set(), set(), features)
         f.write('\n\n')
 
-
     # TODO
     def write_function_def(self, fobj, func):
         fobj.write('{} {}('.format(func.proto.ret.to_nim(), self.map_func_name(func)))
         fobj.write(', '.join(param.type.to_nim() for param in func.params))
         fobj.write(');\n')
-
 
     def generate_extensions(self, extensions, enums, functions):
         f = self._f_gl
@@ -465,7 +457,7 @@ class NimGenerator(Generator):
         if (ret != 'void'):
           fobj.write(': {}'.format(ret))
 
-        fobj.write(' {.cdecl.}')
+        fobj.write(' {.cdecl, gcsafe.}')
 
 # TODO
 #    def write_function_var(self, fobj, func):
@@ -482,15 +474,13 @@ class NimGenerator(Generator):
 #        fobj.write(' {.cdecl.}]')
 #        fobj.write(' (getProcAddress("{}"))\n'.format(func.proto.name))
 
-
-    NIM_KEYWORDS = [   # as of Nim 0.13.0
-      'addr', 'and', 'as', 'asm', 'atomic',
+    NIM_KEYWORDS = [   # as of Nim 1.0.2
+      'addr', 'and', 'as', 'asm',
       'bind', 'block', 'break',
       'case', 'cast', 'concept', 'const', 'continue', 'converter',
       'defer', 'discard', 'distinct', 'div', 'do',
       'elif', 'else', 'end', 'enum', 'except', 'export',
       'finally', 'for', 'from', 'func',
-      'generic',
       'if', 'import', 'in', 'include', 'interface', 'is', 'isnot', 'iterator',
       'let',
       'macro', 'method', 'mixin', 'mod',
@@ -502,7 +492,7 @@ class NimGenerator(Generator):
       'template', 'try', 'tuple', 'type',
       'using',
       'var',
-      'when', 'while', 'with', 'without',
+      'when', 'while',
       'xor',
       'yield'
     ]
@@ -522,7 +512,10 @@ class NimGenerator(Generator):
     def write_enum(self, fobj, name, value, type='GLenum'):
         fobj.write('  {}*'.format(self.map_enum_name(name)))
         if type:
-          fobj.write(': {0} = {0}({1})'.format(type, value))
+          if type == 'uint64':  # bit hacky...
+            fobj.write(": {0} = {1}'u64".format(type, value))
+          else:
+            fobj.write(': {0} = {0}({1})'.format(type, value))
         else:
           fobj.write(' = {}'.format(value))
         fobj.write('\n')
